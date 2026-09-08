@@ -3,6 +3,12 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { attendances, users, practiceSessions } from "@/db/schema";
 import { eq, gte, lte, and, desc, sql, count } from "drizzle-orm";
+import { differenceInMinutes } from "date-fns";
+
+const GRACE_PERIOD_MINUTES = parseInt(
+  process.env.GRACE_PERIOD_MINUTES ?? "5",
+  10,
+);
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -47,13 +53,13 @@ export async function GET(req: NextRequest) {
       .innerJoin(users, eq(attendances.userId, users.id))
       .innerJoin(
         practiceSessions,
-        eq(attendances.sessionId, practiceSessions.id)
+        eq(attendances.sessionId, practiceSessions.id),
       )
       .where(dateFilters.length > 0 ? and(...dateFilters) : undefined)
       .groupBy(users.id, users.name, users.email, users.branch)
       .orderBy(
         desc(count(attendances.id)),
-        sql`cast(sum(case when ${attendances.isLate} then 1 else 0 end) as int) DESC`
+        sql`cast(sum(case when ${attendances.isLate} then 1 else 0 end) as int) DESC`,
       );
 
     return NextResponse.json({ rows, totalPracticeSessions });
@@ -75,12 +81,135 @@ export async function GET(req: NextRequest) {
     })
     .from(attendances)
     .innerJoin(users, eq(attendances.userId, users.id))
-    .innerJoin(
-      practiceSessions,
-      eq(attendances.sessionId, practiceSessions.id)
-    )
+    .innerJoin(practiceSessions, eq(attendances.sessionId, practiceSessions.id))
     .where(dateFilters.length > 0 ? and(...dateFilters) : undefined)
     .orderBy(desc(practiceSessions.startTime));
 
   return NextResponse.json({ rows, totalPracticeSessions });
+}
+
+export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user || session.user.role !== "ADMIN") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const body = (await req.json()) as {
+    userId?: string;
+    sessionId?: string;
+    attendanceId?: string;
+    scannedAt?: string;
+  };
+
+  if (!body.userId || !body.sessionId) {
+    return NextResponse.json(
+      { error: "userId and sessionId are required" },
+      { status: 400 },
+    );
+  }
+
+  const [targetUser] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, body.userId))
+    .limit(1);
+  const [targetSession] = await db
+    .select({ id: practiceSessions.id, startTime: practiceSessions.startTime })
+    .from(practiceSessions)
+    .where(eq(practiceSessions.id, body.sessionId))
+    .limit(1);
+
+  if (!targetUser || !targetSession) {
+    return NextResponse.json(
+      { error: "User or session not found" },
+      { status: 404 },
+    );
+  }
+
+  const scannedAt = body.scannedAt ? new Date(body.scannedAt) : new Date();
+  if (Number.isNaN(scannedAt.getTime())) {
+    return NextResponse.json(
+      { error: "Invalid check-in time" },
+      { status: 400 },
+    );
+  }
+
+  const minutesLate = Math.max(
+    0,
+    differenceInMinutes(scannedAt, targetSession.startTime),
+  );
+  const isLate = minutesLate > GRACE_PERIOD_MINUTES;
+
+  if (body.attendanceId) {
+    const [conflictingAttendance] = await db
+      .select({ id: attendances.id })
+      .from(attendances)
+      .where(
+        and(
+          eq(attendances.userId, body.userId),
+          eq(attendances.sessionId, body.sessionId),
+        ),
+      )
+      .limit(1);
+
+    if (
+      conflictingAttendance &&
+      conflictingAttendance.id !== body.attendanceId
+    ) {
+      return NextResponse.json(
+        { error: "This user already has attendance for the selected session" },
+        { status: 409 },
+      );
+    }
+
+    const [updated] = await db
+      .update(attendances)
+      .set({
+        userId: body.userId,
+        sessionId: body.sessionId,
+        scannedAt,
+        minutesLate,
+        isLate,
+      })
+      .where(eq(attendances.id, body.attendanceId))
+      .returning();
+
+    if (!updated) {
+      return NextResponse.json(
+        { error: "Attendance record not found" },
+        { status: 404 },
+      );
+    }
+    return NextResponse.json({ attendance: updated });
+  }
+
+  const [existing] = await db
+    .select({ id: attendances.id })
+    .from(attendances)
+    .where(
+      and(
+        eq(attendances.userId, body.userId),
+        eq(attendances.sessionId, body.sessionId),
+      ),
+    )
+    .limit(1);
+
+  const [attendance] = existing
+    ? await db
+        .update(attendances)
+        .set({ scannedAt, minutesLate, isLate })
+        .where(eq(attendances.id, existing.id))
+        .returning()
+    : await db
+        .insert(attendances)
+        .values({
+          userId: body.userId,
+          sessionId: body.sessionId,
+          scannedAt,
+          minutesLate,
+          isLate,
+        })
+        .returning();
+
+  return NextResponse.json({ attendance }, { status: existing ? 200 : 201 });
 }

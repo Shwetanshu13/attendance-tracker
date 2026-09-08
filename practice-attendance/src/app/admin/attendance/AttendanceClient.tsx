@@ -1,14 +1,13 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { format } from "date-fns";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "@/components/ui/StatCard";
+import { Modal } from "@/components/ui/Modal";
 import {
-  Calendar,
   Clock,
   CheckCircle2,
-  AlertTriangle,
   Search,
   ArrowLeft,
   Download,
@@ -16,6 +15,8 @@ import {
   RefreshCw,
   TrendingDown,
   Activity,
+  Edit3,
+  Plus,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -43,6 +44,17 @@ export interface RegularityRecord {
   avgMinutesLate: number;
 }
 
+interface SelectableUser {
+  id: string;
+  name: string | null;
+  email: string;
+}
+
+interface SelectableSession {
+  id: string;
+  startTime: string;
+}
+
 interface AttendanceClientProps {
   initialRecords: AttendanceRecord[];
   initialTotalSessions: number;
@@ -54,21 +66,108 @@ export function AttendanceClient({
 }: AttendanceClientProps) {
   const [activeTab, setActiveTab] = useState<"all" | "late">("all");
   const [records, setRecords] = useState<AttendanceRecord[]>(initialRecords);
-  const [totalPracticeSessions, setTotalPracticeSessions] = useState(
-    initialTotalSessions
-  );
-  const [regularityRecords, setRegularityRecords] = useState<RegularityRecord[]>([]);
+  const [totalPracticeSessions, setTotalPracticeSessions] =
+    useState(initialTotalSessions);
+  const [regularityRecords, setRegularityRecords] = useState<
+    RegularityRecord[]
+  >([]);
   const [search, setSearch] = useState("");
   const [branchFilter, setBranchFilter] = useState("ALL");
-  const [statusFilter, setStatusFilter] = useState<"ALL" | "ON_TIME" | "LATE">("ALL");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "ON_TIME" | "LATE">(
+    "ALL",
+  );
 
   // Date filters
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [isRefetching, setIsRefetching] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualUsers, setManualUsers] = useState<SelectableUser[]>([]);
+  const [manualSessions, setManualSessions] = useState<SelectableSession[]>([]);
+  const [manualAttendanceId, setManualAttendanceId] = useState<string | null>(
+    null,
+  );
+  const [manualUserId, setManualUserId] = useState("");
+  const [manualSessionId, setManualSessionId] = useState("");
+  const [manualScannedAt, setManualScannedAt] = useState("");
+  const [isSavingManual, setIsSavingManual] = useState(false);
+  const [manualError, setManualError] = useState<string | null>(null);
+
+  const openManualAttendance = async (record?: AttendanceRecord) => {
+    setManualError(null);
+    setManualAttendanceId(record?.id ?? null);
+    setManualUserId("");
+    setManualSessionId(record?.sessionId ?? "");
+    setManualScannedAt(
+      record
+        ? format(new Date(record.scannedAt), "yyyy-MM-dd'T'HH:mm")
+        : format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+    );
+    setManualOpen(true);
+
+    try {
+      const [usersResponse, sessionsResponse] = await Promise.all([
+        fetch("/api/admin/users"),
+        fetch("/api/admin/sessions"),
+      ]);
+      const usersData = await usersResponse.json();
+      const sessionsData = await sessionsResponse.json();
+      setManualUsers(usersData.users ?? []);
+      setManualSessions(
+        (sessionsData.sessions ?? []).map((item: SelectableSession) => ({
+          id: item.id,
+          startTime: new Date(item.startTime).toISOString(),
+        })),
+      );
+      if (record) {
+        setManualUserId(
+          usersData.users?.find(
+            (user: SelectableUser) => user.email === record.userEmail,
+          )?.id ?? "",
+        );
+      }
+      if (!record && sessionsData.sessions?.[0]) {
+        setManualSessionId(sessionsData.sessions[0].id);
+      }
+    } catch {
+      setManualError("Could not load users and sessions.");
+    }
+  };
+
+  const saveManualAttendance = async () => {
+    if (!manualUserId || !manualSessionId || !manualScannedAt) {
+      setManualError("Select a user, session, and check-in time.");
+      return;
+    }
+    setIsSavingManual(true);
+    setManualError(null);
+    try {
+      const response = await fetch("/api/admin/attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: manualUserId,
+          sessionId: manualSessionId,
+          attendanceId: manualAttendanceId,
+          scannedAt: new Date(manualScannedAt).toISOString(),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok)
+        throw new Error(data.error || "Failed to save attendance");
+      setManualOpen(false);
+      await fetchFilteredData();
+    } catch (error) {
+      setManualError(
+        error instanceof Error ? error.message : "Failed to save attendance",
+      );
+    } finally {
+      setIsSavingManual(false);
+    }
+  };
 
   // Fetch updated data on date filter change
-  const fetchFilteredData = async () => {
+  const fetchFilteredData = useCallback(async () => {
     setIsRefetching(true);
     try {
       const params = new URLSearchParams();
@@ -80,11 +179,11 @@ export function AttendanceClient({
       const dataAll = await resAll.json();
       if (dataAll.rows) {
         setRecords(
-          dataAll.rows.map((r: any) => ({
+          dataAll.rows.map((r: AttendanceRecord) => ({
             ...r,
             scannedAt: new Date(r.scannedAt).toISOString(),
             sessionStartTime: new Date(r.sessionStartTime).toISOString(),
-          }))
+          })),
         );
       }
       if (dataAll.totalPracticeSessions !== undefined) {
@@ -106,14 +205,14 @@ export function AttendanceClient({
     } finally {
       setIsRefetching(false);
     }
-  };
+  }, [fromDate, toDate]);
 
   // Load regularity records on initial mount
   useEffect(() => {
     if (regularityRecords.length === 0) {
       fetchFilteredData();
     }
-  }, []);
+  }, [fetchFilteredData, regularityRecords.length]);
 
   // Filtered All Records
   const filteredRecords = useMemo(() => {
@@ -125,7 +224,9 @@ export function AttendanceClient({
 
       const matchesBranch =
         branchFilter === "ALL" ||
-        (branchFilter === "NONE" ? !r.userBranch : r.userBranch === branchFilter);
+        (branchFilter === "NONE"
+          ? !r.userBranch
+          : r.userBranch === branchFilter);
 
       const matchesStatus =
         statusFilter === "ALL" ||
@@ -188,7 +289,7 @@ export function AttendanceClient({
       link.setAttribute("href", encodedUri);
       link.setAttribute(
         "download",
-        `attendance_records_${format(new Date(), "yyyy-MM-dd")}.csv`
+        `attendance_records_${format(new Date(), "yyyy-MM-dd")}.csv`,
       );
       document.body.appendChild(link);
       link.click();
@@ -207,7 +308,8 @@ export function AttendanceClient({
       ];
       const rows = filteredRegularity.map((r) => {
         const total = r.totalPracticeSessions || totalPracticeSessions || 0;
-        const regRate = total > 0 ? Math.round((r.attendedSessions / total) * 100) : 0;
+        const regRate =
+          total > 0 ? Math.round((r.attendedSessions / total) * 100) : 0;
         const lateRate =
           r.attendedSessions > 0
             ? Math.round((r.lateCount / r.attendedSessions) * 100)
@@ -232,7 +334,7 @@ export function AttendanceClient({
       link.setAttribute("href", encodedUri);
       link.setAttribute(
         "download",
-        `regularity_and_lateness_${format(new Date(), "yyyy-MM-dd")}.csv`
+        `regularity_and_lateness_${format(new Date(), "yyyy-MM-dd")}.csv`,
       );
       document.body.appendChild(link);
       link.click();
@@ -255,17 +357,28 @@ export function AttendanceClient({
             Attendance Logs & Student Regularity
           </h1>
           <p className="text-slate-400 text-sm mt-0.5">
-            Audit practice check-ins, measure attendance rates, and identify chronic tardiness
+            Audit practice check-ins, measure attendance rates, and identify
+            chronic tardiness
           </p>
         </div>
 
-        <button
-          onClick={handleExportCSV}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-pitch-800 hover:bg-pitch-700 border border-white/10 text-slate-200 hover:text-white text-xs font-medium transition-all shadow-sm w-fit"
-        >
-          <Download size={14} className="text-emerald-400" />
-          Export {activeTab === "all" ? "Logs (CSV)" : "Regularity & Lateness (CSV)"}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleExportCSV}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-pitch-800 hover:bg-pitch-700 border border-white/10 text-slate-200 hover:text-white text-xs font-medium transition-all shadow-sm w-fit"
+          >
+            <Download size={14} className="text-emerald-400" />
+            Export{" "}
+            {activeTab === "all" ? "Logs (CSV)" : "Regularity & Lateness (CSV)"}
+          </button>
+          <button
+            onClick={() => openManualAttendance()}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-semibold transition-all w-fit"
+          >
+            <Plus size={14} />
+            Add Attendance
+          </button>
+        </div>
       </div>
 
       {/* Summary KPI Cards */}
@@ -486,6 +599,9 @@ export function AttendanceClient({
                       <th className="text-right px-5 py-3.5 text-slate-400 font-medium text-xs uppercase tracking-wider">
                         Lateness
                       </th>
+                      <th className="text-right px-5 py-3.5 text-slate-400 font-medium text-xs uppercase tracking-wider">
+                        Actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -497,7 +613,7 @@ export function AttendanceClient({
                         <td className="px-5 py-3.5 text-slate-200 font-medium">
                           {format(
                             new Date(r.sessionStartTime),
-                            "dd MMM yyyy, h:mm a"
+                            "dd MMM yyyy, h:mm a",
                           )}
                         </td>
                         <td className="px-5 py-3.5">
@@ -533,6 +649,14 @@ export function AttendanceClient({
                           ) : (
                             <span className="text-slate-500">0 min</span>
                           )}
+                        </td>
+                        <td className="px-5 py-3.5 text-right">
+                          <button
+                            onClick={() => openManualAttendance(r)}
+                            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-emerald-400 transition-colors"
+                          >
+                            <Edit3 size={13} /> Edit
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -588,7 +712,7 @@ export function AttendanceClient({
                       const lateRatio =
                         row.attendedSessions > 0
                           ? Math.round(
-                              (row.lateCount / row.attendedSessions) * 100
+                              (row.lateCount / row.attendedSessions) * 100,
                             )
                           : 0;
                       const isHighLate = row.lateCount >= 3 || lateRatio >= 50;
@@ -632,10 +756,12 @@ export function AttendanceClient({
                                       regRatio >= 75
                                         ? "bg-emerald-400"
                                         : regRatio >= 50
-                                        ? "bg-amber-400"
-                                        : "bg-red-400"
+                                          ? "bg-amber-400"
+                                          : "bg-red-400"
                                     }`}
-                                    style={{ width: `${Math.min(regRatio, 100)}%` }}
+                                    style={{
+                                      width: `${Math.min(regRatio, 100)}%`,
+                                    }}
                                   />
                                 </div>
                                 <span
@@ -643,8 +769,8 @@ export function AttendanceClient({
                                     regRatio >= 75
                                       ? "text-emerald-400"
                                       : regRatio >= 50
-                                      ? "text-amber-400"
-                                      : "text-red-400"
+                                        ? "text-amber-400"
+                                        : "text-red-400"
                                   }`}
                                 >
                                   {regRatio}%
@@ -660,8 +786,8 @@ export function AttendanceClient({
                                 row.lateCount === 0
                                   ? "bg-emerald-500/10 text-emerald-400"
                                   : isHighLate
-                                  ? "bg-red-500/15 text-red-400"
-                                  : "bg-amber-500/15 text-amber-400"
+                                    ? "bg-red-500/15 text-red-400"
+                                    : "bg-amber-500/15 text-amber-400"
                               }`}
                             >
                               {row.lateCount}
@@ -693,6 +819,82 @@ export function AttendanceClient({
           )}
         </section>
       )}
+
+      <Modal
+        isOpen={manualOpen}
+        onClose={() => setManualOpen(false)}
+        title={manualAttendanceId ? "Edit attendance" : "Add attendance"}
+      >
+        <div className="p-6 space-y-4">
+          <label className="block">
+            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5 block">
+              Player
+            </span>
+            <select
+              value={manualUserId}
+              onChange={(event) => setManualUserId(event.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl bg-pitch-900 border border-white/10 text-slate-200 text-sm"
+              style={{ colorScheme: "dark" }}
+            >
+              <option value="">Select player</option>
+              {manualUsers.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.name || user.email} ({user.email})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5 block">
+              Practice session
+            </span>
+            <select
+              value={manualSessionId}
+              onChange={(event) => setManualSessionId(event.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl bg-pitch-900 border border-white/10 text-slate-200 text-sm"
+              style={{ colorScheme: "dark" }}
+            >
+              <option value="">Select session</option>
+              {manualSessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {format(new Date(session.startTime), "dd MMM yyyy, h:mm a")}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5 block">
+              Check-in time
+            </span>
+            <input
+              type="datetime-local"
+              value={manualScannedAt}
+              onChange={(event) => setManualScannedAt(event.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl bg-pitch-900 border border-white/10 text-slate-200 text-sm"
+              style={{ colorScheme: "dark" }}
+            />
+          </label>
+          {manualError && <p className="text-sm text-red-400">{manualError}</p>}
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              onClick={() => setManualOpen(false)}
+              className="px-4 py-2.5 rounded-xl border border-white/10 text-slate-300 hover:bg-white/5 text-sm font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={saveManualAttendance}
+              disabled={isSavingManual}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-semibold disabled:opacity-60"
+            >
+              {isSavingManual && (
+                <RefreshCw size={14} className="animate-spin" />
+              )}
+              {isSavingManual ? "Saving..." : "Save Attendance"}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

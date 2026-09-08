@@ -4,11 +4,11 @@ import { useState } from "react";
 import { format } from "date-fns";
 import { QrDisplay } from "@/components/QrDisplay";
 import { Badge } from "@/components/ui/Badge";
+import { Modal } from "@/components/ui/Modal";
 import {
   Plus,
   Power,
   Calendar,
-  Clock,
   RefreshCw,
   Users,
   BarChart3,
@@ -39,19 +39,20 @@ export function AdminClient({
 }: AdminClientProps) {
   const [sessions, setSessions] = useState<Session[]>(initialSessions);
   const [activeSession, setActiveSession] = useState<Session | null>(
-    initialActiveSession
+    initialActiveSession,
   );
   const [creating, setCreating] = useState(false);
   const [expiring, setExpiring] = useState(false);
+  const [showExpireConfirmation, setShowExpireConfirmation] = useState(false);
   const [startTime, setStartTime] = useState(
-    format(new Date(), "yyyy-MM-dd'T'HH:mm")
+    format(new Date(), "yyyy-MM-dd'T'HH:mm"),
   );
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const baseUrl =
     typeof window !== "undefined"
       ? window.location.origin
-      : process.env.NEXT_PUBLIC_APP_URL ?? "";
+      : (process.env.NEXT_PUBLIC_APP_URL ?? "");
 
   const handleCreate = async () => {
     setCreating(true);
@@ -78,7 +79,7 @@ export function AdminClient({
           ? `late (+${data.adminAttendance.minutesLate}m)`
           : "On Time ✓";
         setToastMessage(
-          `QR Code generated! Your attendance has been automatically logged (${latenessText}).`
+          `QR Code generated! Your attendance has been automatically logged (${latenessText}).`,
         );
         setTimeout(() => setToastMessage(null), 6000);
       }
@@ -91,15 +92,19 @@ export function AdminClient({
 
   const handleExpire = async () => {
     if (!activeSession) return;
+    setShowExpireConfirmation(false);
     setExpiring(true);
     try {
-      await fetch(`/api/admin/sessions/${activeSession.id}`, {
+      const response = await fetch(`/api/admin/sessions/${activeSession.id}`, {
         method: "PATCH",
       });
+      if (!response.ok) {
+        throw new Error("Failed to expire session");
+      }
       const expired = { ...activeSession, isActive: false };
       setActiveSession(null);
       setSessions((prev) =>
-        prev.map((s) => (s.id === activeSession.id ? expired : s))
+        prev.map((s) => (s.id === activeSession.id ? expired : s)),
       );
     } catch {
       alert("Failed to expire session.");
@@ -113,7 +118,10 @@ export function AdminClient({
       {/* Toast Notification for Admin Attendance */}
       {toastMessage && (
         <div className="p-4 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-sm flex items-start gap-3 shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
-          <CheckCircle2 size={18} className="text-emerald-400 mt-0.5 shrink-0" />
+          <CheckCircle2
+            size={18}
+            className="text-emerald-400 mt-0.5 shrink-0"
+          />
           <div>
             <p className="font-semibold text-slate-100">Session Initialized</p>
             <p className="text-xs text-emerald-300/90 mt-0.5">{toastMessage}</p>
@@ -175,7 +183,8 @@ export function AdminClient({
           <p className="text-xs text-slate-400 flex items-center gap-1.5">
             <Crown size={13} className="text-amber-400" />
             <span>
-              Generating the QR code automatically logs your attendance as present.
+              Generating the QR code automatically logs your attendance as
+              present.
             </span>
           </p>
 
@@ -206,7 +215,9 @@ export function AdminClient({
               ) : (
                 <Plus size={16} />
               )}
-              {creating ? "Generating & Logging Attendance…" : "Generate QR Code"}
+              {creating
+                ? "Generating & Logging Attendance…"
+                : "Generate QR Code"}
             </button>
           )}
         </div>
@@ -219,7 +230,7 @@ export function AdminClient({
             url={`${baseUrl}/attend/${activeSession.qrToken}`}
             sessionDate={format(
               new Date(activeSession.startTime),
-              "h:mm a, EEEE dd MMM"
+              "h:mm a, EEEE dd MMM",
             )}
             isActive={activeSession.isActive}
             creatorName={activeSession.creatorName}
@@ -227,7 +238,7 @@ export function AdminClient({
 
           <button
             id="expire-qr-btn"
-            onClick={handleExpire}
+            onClick={() => setShowExpireConfirmation(true)}
             disabled={expiring}
             className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-red-500/10 border border-red-500/25 text-red-400 hover:bg-red-500/20 font-semibold text-sm transition-all disabled:opacity-60"
           >
@@ -240,6 +251,34 @@ export function AdminClient({
           </button>
         </div>
       )}
+
+      <Modal
+        isOpen={showExpireConfirmation}
+        onClose={() => setShowExpireConfirmation(false)}
+        title="Expire practice session?"
+      >
+        <div className="p-6 space-y-5">
+          <p className="text-sm text-slate-300">
+            Players will no longer be able to check in with this QR code.
+            Existing attendance records will remain unchanged.
+          </p>
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => setShowExpireConfirmation(false)}
+              className="px-4 py-2.5 rounded-xl border border-white/10 text-slate-300 hover:bg-white/5 text-sm font-medium transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleExpire}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500 text-white hover:bg-red-400 text-sm font-semibold transition-colors"
+            >
+              <Power size={15} />
+              Expire Session
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Recent sessions list */}
       <section>
@@ -282,7 +321,10 @@ export function AdminClient({
                       <td className="px-4 py-3 text-slate-300">
                         {s.creatorName ? (
                           <div className="flex items-center gap-1.5">
-                            <Crown size={13} className="text-amber-400 shrink-0" />
+                            <Crown
+                              size={13}
+                              className="text-amber-400 shrink-0"
+                            />
                             <span className="font-medium text-slate-200">
                               {s.creatorName}
                             </span>
