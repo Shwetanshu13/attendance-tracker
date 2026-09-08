@@ -25,9 +25,14 @@ interface CheckinResponse {
 interface AttendClientProps {
   qrToken: string;
   userName: string;
+  creatorName?: string | null;
 }
 
-export function AttendClient({ qrToken, userName }: AttendClientProps) {
+export function AttendClient({
+  qrToken,
+  userName,
+  creatorName,
+}: AttendClientProps) {
   const [status, setStatus] = useState<
     "loading" | "success" | "already" | "expired" | "invalid" | "error"
   >("loading");
@@ -127,6 +132,12 @@ export function AttendClient({ qrToken, userName }: AttendClientProps) {
                         : "Just now"}
                     </span>
                   </div>
+                  {creatorName && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Session Captain:</span>
+                      <span className="font-medium text-slate-200">{creatorName}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span className="text-slate-500">Lateness Delay:</span>
                     <span className="font-semibold text-amber-400">
@@ -162,6 +173,12 @@ export function AttendClient({ qrToken, userName }: AttendClientProps) {
                         : "Just now"}
                     </span>
                   </div>
+                  {creatorName && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Session Captain:</span>
+                      <span className="font-medium text-slate-200">{creatorName}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span className="text-slate-500">Status:</span>
                     <span className="font-semibold text-emerald-400">
@@ -208,6 +225,12 @@ export function AttendClient({ qrToken, userName }: AttendClientProps) {
                     {format(new Date(result.scannedAt), "h:mm:ss a, dd MMM")}
                   </span>
                 </div>
+                {creatorName && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Session Captain:</span>
+                    <span className="font-medium text-slate-200">{creatorName}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-slate-500">Status:</span>
                   <span

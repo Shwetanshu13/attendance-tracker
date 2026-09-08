@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { Navbar } from "@/components/Navbar";
 import { AdminClient } from "./AdminClient";
 import { db } from "@/db";
-import { practiceSessions } from "@/db/schema";
+import { practiceSessions, users } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import type { Metadata } from "next";
 
@@ -16,8 +16,18 @@ export default async function AdminPage() {
   if (!session?.user || session.user.role !== "ADMIN") redirect("/dashboard");
 
   const sessions = await db
-    .select()
+    .select({
+      id: practiceSessions.id,
+      startTime: practiceSessions.startTime,
+      qrToken: practiceSessions.qrToken,
+      isActive: practiceSessions.isActive,
+      createdBy: practiceSessions.createdBy,
+      createdAt: practiceSessions.createdAt,
+      creatorName: users.name,
+      creatorEmail: users.email,
+    })
     .from(practiceSessions)
+    .leftJoin(users, eq(practiceSessions.createdBy, users.id))
     .orderBy(desc(practiceSessions.startTime))
     .limit(10);
 
@@ -32,7 +42,7 @@ export default async function AdminPage() {
             Admin Dashboard
           </h1>
           <p className="text-slate-400 text-sm mt-1">
-            Generate QR codes and manage practice sessions
+            Generate QR codes and manage team practice sessions
           </p>
         </div>
 
@@ -41,6 +51,8 @@ export default async function AdminPage() {
             ...s,
             startTime: s.startTime.toISOString(),
             createdAt: s.createdAt.toISOString(),
+            creatorName: s.creatorName,
+            creatorEmail: s.creatorEmail,
           }))}
           initialActiveSession={
             activeSession
@@ -48,6 +60,8 @@ export default async function AdminPage() {
                   ...activeSession,
                   startTime: activeSession.startTime.toISOString(),
                   createdAt: activeSession.createdAt.toISOString(),
+                  creatorName: activeSession.creatorName,
+                  creatorEmail: activeSession.creatorEmail,
                 }
               : null
           }

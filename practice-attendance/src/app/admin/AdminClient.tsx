@@ -12,6 +12,8 @@ import {
   RefreshCw,
   Users,
   BarChart3,
+  CheckCircle2,
+  Crown,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -22,6 +24,8 @@ interface Session {
   isActive: boolean;
   createdBy: string;
   createdAt: string;
+  creatorName?: string | null;
+  creatorEmail?: string | null;
 }
 
 interface AdminClientProps {
@@ -42,6 +46,7 @@ export function AdminClient({
   const [startTime, setStartTime] = useState(
     format(new Date(), "yyyy-MM-dd'T'HH:mm")
   );
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const baseUrl =
     typeof window !== "undefined"
@@ -50,6 +55,7 @@ export function AdminClient({
 
   const handleCreate = async () => {
     setCreating(true);
+    setToastMessage(null);
     try {
       const res = await fetch("/api/admin/sessions", {
         method: "POST",
@@ -62,9 +68,19 @@ export function AdminClient({
           ...data.session,
           startTime: data.session.startTime,
           createdAt: data.session.createdAt,
+          creatorName: data.session.creatorName,
+          creatorEmail: data.session.creatorEmail,
         };
         setSessions((prev) => [newSession, ...prev]);
         setActiveSession(newSession);
+
+        const latenessText = data.adminAttendance?.isLate
+          ? `late (+${data.adminAttendance.minutesLate}m)`
+          : "On Time ✓";
+        setToastMessage(
+          `QR Code generated! Your attendance has been automatically logged (${latenessText}).`
+        );
+        setTimeout(() => setToastMessage(null), 6000);
       }
     } catch {
       alert("Failed to create session. Please try again.");
@@ -94,6 +110,17 @@ export function AdminClient({
 
   return (
     <div className="space-y-6">
+      {/* Toast Notification for Admin Attendance */}
+      {toastMessage && (
+        <div className="p-4 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-sm flex items-start gap-3 shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
+          <CheckCircle2 size={18} className="text-emerald-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-semibold text-slate-100">Session Initialized</p>
+            <p className="text-xs text-emerald-300/90 mt-0.5">{toastMessage}</p>
+          </div>
+        </div>
+      )}
+
       {/* Quick nav */}
       <div className="grid grid-cols-2 gap-3">
         <Link
@@ -126,7 +153,7 @@ export function AdminClient({
       <div className="glass rounded-2xl p-6 space-y-5">
         <h2 className="text-base font-semibold text-slate-100 flex items-center gap-2">
           <Calendar size={16} className="text-emerald-400" />
-          Generate QR Code
+          Generate Practice QR Code
         </h2>
 
         <div className="space-y-3">
@@ -145,11 +172,27 @@ export function AdminClient({
             />
           </label>
 
+          <p className="text-xs text-slate-400 flex items-center gap-1.5">
+            <Crown size={13} className="text-amber-400" />
+            <span>
+              Generating the QR code automatically logs your attendance as present.
+            </span>
+          </p>
+
           {activeSession ? (
-            <div className="p-3 rounded-xl bg-emerald-500/8 border border-emerald-500/20 text-sm text-emerald-300 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-              Active session: started at{" "}
-              {format(new Date(activeSession.startTime), "h:mm a, dd MMM")}
+            <div className="p-3 rounded-xl bg-emerald-500/8 border border-emerald-500/20 text-sm text-emerald-300 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                <span>
+                  Active session: started at{" "}
+                  {format(new Date(activeSession.startTime), "h:mm a, dd MMM")}
+                </span>
+              </div>
+              {activeSession.creatorName && (
+                <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-medium">
+                  By {activeSession.creatorName}
+                </span>
+              )}
             </div>
           ) : (
             <button
@@ -163,7 +206,7 @@ export function AdminClient({
               ) : (
                 <Plus size={16} />
               )}
-              {creating ? "Creating…" : "Generate QR Code"}
+              {creating ? "Generating & Logging Attendance…" : "Generate QR Code"}
             </button>
           )}
         </div>
@@ -179,6 +222,7 @@ export function AdminClient({
               "h:mm a, EEEE dd MMM"
             )}
             isActive={activeSession.isActive}
+            creatorName={activeSession.creatorName}
           />
 
           <button
@@ -216,6 +260,9 @@ export function AdminClient({
                       Start Time
                     </th>
                     <th className="text-left px-4 py-3 text-slate-400 font-medium text-xs uppercase tracking-wider">
+                      Generated By
+                    </th>
+                    <th className="text-left px-4 py-3 text-slate-400 font-medium text-xs uppercase tracking-wider">
                       Status
                     </th>
                     <th className="text-left px-4 py-3 text-slate-400 font-medium text-xs uppercase tracking-wider">
@@ -231,6 +278,18 @@ export function AdminClient({
                     >
                       <td className="px-4 py-3 text-slate-200 font-medium">
                         {format(new Date(s.startTime), "h:mm a, dd MMM yyyy")}
+                      </td>
+                      <td className="px-4 py-3 text-slate-300">
+                        {s.creatorName ? (
+                          <div className="flex items-center gap-1.5">
+                            <Crown size={13} className="text-amber-400 shrink-0" />
+                            <span className="font-medium text-slate-200">
+                              {s.creatorName}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-500">Admin</span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <Badge variant={s.isActive ? "active" : "expired"}>
