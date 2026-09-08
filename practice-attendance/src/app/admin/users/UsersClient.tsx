@@ -26,6 +26,7 @@ export interface UserItem {
   branch: string | null;
   role: "ADMIN" | "USER";
   createdAt: string;
+  attendedCount?: number;
 }
 
 const BRANCHES = [
@@ -42,9 +43,14 @@ const BRANCHES = [
 interface UsersClientProps {
   initialUsers: UserItem[];
   currentUserId: string;
+  totalSessions: number;
 }
 
-export function UsersClient({ initialUsers, currentUserId }: UsersClientProps) {
+export function UsersClient({
+  initialUsers,
+  currentUserId,
+  totalSessions,
+}: UsersClientProps) {
   const router = useRouter();
   const [users, setUsers] = useState<UserItem[]>(initialUsers);
   const [search, setSearch] = useState("");
@@ -258,6 +264,9 @@ export function UsersClient({ initialUsers, currentUserId }: UsersClientProps) {
                     Branch
                   </th>
                   <th className="text-left px-5 py-3.5 text-slate-400 font-medium text-xs uppercase tracking-wider">
+                    Regularity
+                  </th>
+                  <th className="text-left px-5 py-3.5 text-slate-400 font-medium text-xs uppercase tracking-wider">
                     Role
                   </th>
                   <th className="text-left px-5 py-3.5 text-slate-400 font-medium text-xs uppercase tracking-wider">
@@ -271,6 +280,13 @@ export function UsersClient({ initialUsers, currentUserId }: UsersClientProps) {
               <tbody>
                 {filteredUsers.map((user) => {
                   const isSelf = user.id === currentUserId;
+                  const regularityRate =
+                    totalSessions > 0
+                      ? Math.round(
+                          ((user.attendedCount ?? 0) / totalSessions) * 100
+                        )
+                      : 0;
+
                   return (
                     <tr
                       key={user.id}
@@ -312,6 +328,28 @@ export function UsersClient({ initialUsers, currentUserId }: UsersClientProps) {
                             Unassigned
                           </span>
                         )}
+                      </td>
+
+                      {/* Regularity: Attended / Total */}
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-slate-200 text-xs">
+                            {user.attendedCount ?? 0} / {totalSessions}
+                          </span>
+                          {totalSessions > 0 && (
+                            <span
+                              className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                regularityRate >= 75
+                                  ? "bg-emerald-500/15 text-emerald-400"
+                                  : regularityRate >= 50
+                                  ? "bg-amber-500/15 text-amber-400"
+                                  : "bg-red-500/15 text-red-400"
+                              }`}
+                            >
+                              {regularityRate}%
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Role */}

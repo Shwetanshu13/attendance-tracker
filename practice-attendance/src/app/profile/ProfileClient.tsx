@@ -41,6 +41,7 @@ interface ProfileUser {
 
 interface ProfileStats {
   totalAttended: number;
+  totalSessions: number;
   lateInLast10: number;
   totalLate: number;
 }
@@ -65,6 +66,11 @@ export function ProfileClient({ user, stats }: ProfileClientProps) {
       ? Math.round(
           ((stats.totalAttended - stats.totalLate) / stats.totalAttended) * 100
         )
+      : 100;
+
+  const regularityPercentage =
+    stats.totalSessions > 0
+      ? Math.round((stats.totalAttended / stats.totalSessions) * 100)
       : 100;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -113,20 +119,33 @@ export function ProfileClient({ user, stats }: ProfileClientProps) {
       {/* Stats Quick Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <StatCard
-          label="Total Practices"
-          value={stats.totalAttended}
+          label="Sessions Attended"
+          value={`${stats.totalAttended} / ${stats.totalSessions}`}
+          subtitle={`${regularityPercentage}% attendance rate`}
           icon={<CheckCircle2 size={18} />}
-          accent="green"
+          accent={
+            regularityPercentage >= 75
+              ? "green"
+              : regularityPercentage >= 50
+              ? "amber"
+              : "red"
+          }
         />
         <StatCard
           label="Late (Last 10)"
           value={stats.lateInLast10}
+          subtitle={
+            stats.lateInLast10 > 0
+              ? `${stats.lateInLast10} late arrivals`
+              : "Zero delays"
+          }
           icon={<Clock size={18} />}
           accent={stats.lateInLast10 > 2 ? "amber" : "green"}
         />
         <StatCard
           label="On-Time Rate"
           value={`${onTimePercentage}%`}
+          subtitle="Punctuality percentage"
           icon={<CheckCircle2 size={18} />}
           accent="green"
           className="col-span-2 sm:col-span-1"

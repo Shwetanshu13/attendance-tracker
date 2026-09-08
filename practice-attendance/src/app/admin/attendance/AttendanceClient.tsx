@@ -15,6 +15,7 @@ import {
   Filter,
   RefreshCw,
   TrendingDown,
+  Activity,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -31,25 +32,32 @@ export interface AttendanceRecord {
   sessionIsActive: boolean;
 }
 
-export interface LatenessRecord {
+export interface RegularityRecord {
   userId: string;
   name: string | null;
   email: string;
   branch: string | null;
-  totalSessions: number;
+  attendedSessions: number;
+  totalPracticeSessions: number;
   lateCount: number;
   avgMinutesLate: number;
 }
 
 interface AttendanceClientProps {
   initialRecords: AttendanceRecord[];
+  initialTotalSessions: number;
 }
 
-export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
+export function AttendanceClient({
+  initialRecords,
+  initialTotalSessions,
+}: AttendanceClientProps) {
   const [activeTab, setActiveTab] = useState<"all" | "late">("all");
   const [records, setRecords] = useState<AttendanceRecord[]>(initialRecords);
-  const [latenessRecords, setLatenessRecords] = useState<LatenessRecord[]>([]);
-  const [loadingLateness, setLoadingLateness] = useState(false);
+  const [totalPracticeSessions, setTotalPracticeSessions] = useState(
+    initialTotalSessions
+  );
+  const [regularityRecords, setRegularityRecords] = useState<RegularityRecord[]>([]);
   const [search, setSearch] = useState("");
   const [branchFilter, setBranchFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "ON_TIME" | "LATE">("ALL");
@@ -79,13 +87,19 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
           }))
         );
       }
+      if (dataAll.totalPracticeSessions !== undefined) {
+        setTotalPracticeSessions(dataAll.totalPracticeSessions);
+      }
 
-      // Fetch lateness summary
+      // Fetch regularity & lateness summary
       params.append("view", "lateness");
       const resLate = await fetch(`/api/admin/attendance?${params.toString()}`);
       const dataLate = await resLate.json();
       if (dataLate.rows) {
-        setLatenessRecords(dataLate.rows);
+        setRegularityRecords(dataLate.rows);
+      }
+      if (dataLate.totalPracticeSessions !== undefined) {
+        setTotalPracticeSessions(dataLate.totalPracticeSessions);
       }
     } catch (err) {
       console.error("Failed to fetch attendance data", err);
@@ -94,9 +108,9 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
     }
   };
 
-  // Load lateness records on initial mount or when switching tabs
+  // Load regularity records on initial mount
   useEffect(() => {
-    if (latenessRecords.length === 0) {
+    if (regularityRecords.length === 0) {
       fetchFilteredData();
     }
   }, []);
@@ -122,9 +136,9 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
     });
   }, [records, search, branchFilter, statusFilter]);
 
-  // Filtered Lateness Records
-  const filteredLateness = useMemo(() => {
-    return latenessRecords.filter((r) => {
+  // Filtered Regularity Records
+  const filteredRegularity = useMemo(() => {
+    return regularityRecords.filter((r) => {
       const matchesSearch =
         search.trim() === "" ||
         (r.name?.toLowerCase().includes(search.toLowerCase()) ?? false) ||
@@ -136,7 +150,7 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
 
       return matchesSearch && matchesBranch;
     });
-  }, [latenessRecords, search, branchFilter]);
+  }, [regularityRecords, search, branchFilter]);
 
   // Aggregated Stats
   const totalCount = records.length;
@@ -184,21 +198,27 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
         "Player Name",
         "Player Email",
         "Branch",
-        "Total Sessions",
+        "Sessions Attended",
+        "Total Sessions Conducted",
+        "Attendance Rate (%)",
         "Times Late",
         "Late Rate (%)",
         "Avg Min Late",
       ];
-      const rows = filteredLateness.map((r) => {
+      const rows = filteredRegularity.map((r) => {
+        const total = r.totalPracticeSessions || totalPracticeSessions || 0;
+        const regRate = total > 0 ? Math.round((r.attendedSessions / total) * 100) : 0;
         const lateRate =
-          r.totalSessions > 0
-            ? Math.round((r.lateCount / r.totalSessions) * 100)
+          r.attendedSessions > 0
+            ? Math.round((r.lateCount / r.attendedSessions) * 100)
             : 0;
         return [
           `"${r.name || "N/A"}"`,
           `"${r.email}"`,
           `"${r.branch || "Unassigned"}"`,
-          r.totalSessions,
+          r.attendedSessions,
+          total,
+          `${regRate}%`,
           r.lateCount,
           `${lateRate}%`,
           r.avgMinutesLate,
@@ -212,7 +232,7 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
       link.setAttribute("href", encodedUri);
       link.setAttribute(
         "download",
-        `lateness_summary_${format(new Date(), "yyyy-MM-dd")}.csv`
+        `regularity_and_lateness_${format(new Date(), "yyyy-MM-dd")}.csv`
       );
       document.body.appendChild(link);
       link.click();
@@ -232,10 +252,10 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
             <ArrowLeft size={14} /> Back to Sessions
           </Link>
           <h1 className="text-2xl font-bold text-slate-100">
-            Attendance Logs & Analytics
+            Attendance Logs & Student Regularity
           </h1>
           <p className="text-slate-400 text-sm mt-0.5">
-            Audit practice check-ins and track habitual lateness across the team
+            Audit practice check-ins, measure attendance rates, and identify chronic tardiness
           </p>
         </div>
 
@@ -244,7 +264,7 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-pitch-800 hover:bg-pitch-700 border border-white/10 text-slate-200 hover:text-white text-xs font-medium transition-all shadow-sm w-fit"
         >
           <Download size={14} className="text-emerald-400" />
-          Export {activeTab === "all" ? "Logs (CSV)" : "Lateness Summary (CSV)"}
+          Export {activeTab === "all" ? "Logs (CSV)" : "Regularity & Lateness (CSV)"}
         </button>
       </div>
 
@@ -253,32 +273,38 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
         <StatCard
           label="Total Check-ins"
           value={totalCount}
+          subtitle={`${totalPracticeSessions} practice sessions held`}
           icon={<CheckCircle2 size={18} />}
           accent="green"
         />
         <StatCard
+          label="Sessions Held"
+          value={totalPracticeSessions}
+          subtitle={
+            totalPracticeSessions > 0
+              ? `${(totalCount / totalPracticeSessions).toFixed(1)} players avg / session`
+              : "No sessions"
+          }
+          icon={<Activity size={18} />}
+          accent="blue"
+        />
+        <StatCard
           label="On-Time Rate"
           value={`${onTimeRate}%`}
+          subtitle={`${onTimeCount} on-time check-ins`}
           icon={<TrendingDown size={18} />}
           accent={onTimeRate >= 80 ? "green" : "amber"}
         />
         <StatCard
           label="Late Arrivals"
           value={lateCount}
+          subtitle={
+            regularityRecords[0] && regularityRecords[0].lateCount > 0
+              ? `Top late: ${regularityRecords[0].name?.split(" ")[0] ?? "Player"} (${regularityRecords[0].lateCount}x)`
+              : "Zero delays flagged 🎉"
+          }
           icon={<Clock size={18} />}
           accent={lateCount > 0 ? "amber" : "green"}
-        />
-        <StatCard
-          label="Most Frequent Late"
-          value={
-            latenessRecords[0] && latenessRecords[0].lateCount > 0
-              ? `${latenessRecords[0].name?.split(" ")[0] ?? "Player"} (${
-                  latenessRecords[0].lateCount
-                }x)`
-              : "None 🎉"
-          }
-          icon={<AlertTriangle size={18} />}
-          accent="amber"
         />
       </div>
 
@@ -305,10 +331,10 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
               : "text-slate-400 hover:text-slate-200"
           }`}
         >
-          Regularly Late Analysis
-          {latenessRecords.filter((r) => r.lateCount > 1).length > 0 && (
+          Regularity & Lateness Analysis
+          {regularityRecords.filter((r) => r.lateCount > 1).length > 0 && (
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold">
-              {latenessRecords.filter((r) => r.lateCount > 1).length} flagged
+              {regularityRecords.filter((r) => r.lateCount > 1).length} flagged
             </span>
           )}
           {activeTab === "late" && (
@@ -419,7 +445,6 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
               onClick={() => {
                 setFromDate("");
                 setToDate("");
-                // Refetch without dates
                 setTimeout(fetchFilteredData, 0);
               }}
               className="text-slate-500 hover:text-slate-300 underline text-xs"
@@ -519,12 +544,12 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
         </section>
       )}
 
-      {/* Tab 2: Regularly Late Analysis Table */}
+      {/* Tab 2: Regularity & Lateness Analysis Table */}
       {activeTab === "late" && (
         <section>
-          {filteredLateness.length === 0 ? (
+          {filteredRegularity.length === 0 ? (
             <div className="glass rounded-2xl p-10 text-center text-slate-500 text-sm">
-              No lateness data available for the selected criteria.
+              No attendance data available for the selected criteria.
             </div>
           ) : (
             <div className="glass rounded-2xl overflow-hidden shadow-xl">
@@ -539,13 +564,13 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
                         Branch
                       </th>
                       <th className="text-center px-5 py-3.5 text-slate-400 font-medium text-xs uppercase tracking-wider">
-                        Total Attended
+                        Regularity (Attended / Total)
                       </th>
                       <th className="text-center px-5 py-3.5 text-slate-400 font-medium text-xs uppercase tracking-wider">
                         Times Late
                       </th>
                       <th className="text-center px-5 py-3.5 text-slate-400 font-medium text-xs uppercase tracking-wider">
-                        Lateness Frequency
+                        Punctuality
                       </th>
                       <th className="text-right px-5 py-3.5 text-slate-400 font-medium text-xs uppercase tracking-wider">
                         Avg Delay
@@ -553,11 +578,17 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredLateness.map((row) => {
+                    {filteredRegularity.map((row) => {
+                      const total =
+                        row.totalPracticeSessions || totalPracticeSessions || 0;
+                      const regRatio =
+                        total > 0
+                          ? Math.round((row.attendedSessions / total) * 100)
+                          : 0;
                       const lateRatio =
-                        row.totalSessions > 0
+                        row.attendedSessions > 0
                           ? Math.round(
-                              (row.lateCount / row.totalSessions) * 100
+                              (row.lateCount / row.attendedSessions) * 100
                             )
                           : 0;
                       const isHighLate = row.lateCount >= 3 || lateRatio >= 50;
@@ -567,6 +598,7 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
                           key={row.userId}
                           className="border-b border-white/4 last:border-0 hover:bg-white/[0.025] transition-colors"
                         >
+                          {/* Name */}
                           <td className="px-5 py-3.5">
                             <p className="text-slate-100 font-medium leading-none">
                               {row.name || "Player"}
@@ -575,6 +607,8 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
                               {row.email}
                             </p>
                           </td>
+
+                          {/* Branch */}
                           <td className="px-5 py-3.5">
                             {row.branch ? (
                               <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20">
@@ -584,9 +618,42 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
                               <span className="text-xs text-slate-500">—</span>
                             )}
                           </td>
-                          <td className="px-5 py-3.5 text-center text-slate-300 font-medium">
-                            {row.totalSessions}
+
+                          {/* Regularity: Sessions Attended / Total */}
+                          <td className="px-5 py-3.5 text-center">
+                            <div className="flex flex-col items-center gap-1">
+                              <span className="font-semibold text-slate-200">
+                                {row.attendedSessions} / {total}
+                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-14 h-1.5 rounded-full bg-pitch-800 overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full ${
+                                      regRatio >= 75
+                                        ? "bg-emerald-400"
+                                        : regRatio >= 50
+                                        ? "bg-amber-400"
+                                        : "bg-red-400"
+                                    }`}
+                                    style={{ width: `${Math.min(regRatio, 100)}%` }}
+                                  />
+                                </div>
+                                <span
+                                  className={`text-[11px] font-semibold ${
+                                    regRatio >= 75
+                                      ? "text-emerald-400"
+                                      : regRatio >= 50
+                                      ? "text-amber-400"
+                                      : "text-red-400"
+                                  }`}
+                                >
+                                  {regRatio}%
+                                </span>
+                              </div>
+                            </div>
                           </td>
+
+                          {/* Times Late */}
                           <td className="px-5 py-3.5 text-center">
                             <span
                               className={`px-2 py-0.5 rounded-full text-xs font-bold ${
@@ -600,25 +667,17 @@ export function AttendanceClient({ initialRecords }: AttendanceClientProps) {
                               {row.lateCount}
                             </span>
                           </td>
+
+                          {/* Punctuality percentage */}
                           <td className="px-5 py-3.5 text-center">
                             <div className="flex items-center justify-center gap-2">
-                              <div className="w-16 h-1.5 rounded-full bg-pitch-800 overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full ${
-                                    lateRatio > 50
-                                      ? "bg-red-400"
-                                      : lateRatio > 20
-                                      ? "bg-amber-400"
-                                      : "bg-emerald-400"
-                                  }`}
-                                  style={{ width: `${Math.min(lateRatio, 100)}%` }}
-                                />
-                              </div>
-                              <span className="text-xs text-slate-400 font-medium">
-                                {lateRatio}%
+                              <span className="text-xs text-slate-300 font-medium">
+                                {100 - lateRatio}% on time
                               </span>
                             </div>
                           </td>
+
+                          {/* Avg delay */}
                           <td className="px-5 py-3.5 text-right font-medium text-slate-300">
                             {row.avgMinutesLate > 0
                               ? `${row.avgMinutesLate} min`

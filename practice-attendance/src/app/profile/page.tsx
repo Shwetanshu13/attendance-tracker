@@ -3,8 +3,8 @@ import { redirect } from "next/navigation";
 import { Navbar } from "@/components/Navbar";
 import { ProfileClient } from "./ProfileClient";
 import { db } from "@/db";
-import { users, attendances } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { users, attendances, practiceSessions } from "@/db/schema";
+import { eq, desc, count } from "drizzle-orm";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -34,6 +34,11 @@ export default async function ProfilePage() {
     .where(eq(attendances.userId, session.user.id))
     .orderBy(desc(attendances.scannedAt));
 
+  const [totalSessionsResult] = await db
+    .select({ count: count() })
+    .from(practiceSessions);
+  const totalSessions = Number(totalSessionsResult?.count ?? 0);
+
   const totalAttended = userAttendances.length;
   const totalLate = userAttendances.filter((a) => a.isLate).length;
   const lateInLast10 = userAttendances.slice(0, 10).filter((a) => a.isLate).length;
@@ -53,6 +58,7 @@ export default async function ProfilePage() {
           }}
           stats={{
             totalAttended,
+            totalSessions,
             lateInLast10,
             totalLate,
           }}

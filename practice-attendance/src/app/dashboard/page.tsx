@@ -2,7 +2,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { attendances, practiceSessions, users } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, count } from "drizzle-orm";
 import { Navbar } from "@/components/Navbar";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "@/components/ui/StatCard";
@@ -55,19 +55,17 @@ export default async function DashboardPage() {
     .where(eq(users.id, session.user.id))
     .limit(1);
 
-  // Admin: total session count
-  let totalSessions = 0;
-  let totalAttendance = 0;
-  if (isAdmin) {
-    const [sessCount] = await db
-      .select({ count: practiceSessions.id })
-      .from(practiceSessions);
-    const [attCount] = await db
-      .select({ count: attendances.id })
-      .from(attendances);
-    totalSessions = Number((sessCount as any)?.count ?? 0);
-    totalAttendance = Number((attCount as any)?.count ?? 0);
-  }
+  // Total practice sessions held
+  const [sessCount] = await db
+    .select({ count: count() })
+    .from(practiceSessions);
+  const totalSessions = Number(sessCount?.count ?? 0);
+
+  const attendedCount = history.length;
+  const regularityPercent =
+    totalSessions > 0
+      ? Math.round((attendedCount / totalSessions) * 100)
+      : 100;
 
   return (
     <>
@@ -127,19 +125,22 @@ export default async function DashboardPage() {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <StatCard
             label="Sessions Attended"
-            value={history.length}
+            value={`${attendedCount} / ${totalSessions}`}
+            subtitle={`${regularityPercent}% attendance rate`}
             icon={<CheckCircle2 size={18} />}
-            accent="green"
+            accent={regularityPercent >= 75 ? "green" : regularityPercent >= 50 ? "amber" : "red"}
           />
           <StatCard
             label="Late (last 10)"
             value={lateInLast10}
+            subtitle={lateInLast10 > 0 ? `${lateInLast10} tardy check-ins` : "All on time"}
             icon={<Clock size={18} />}
-            accent={lateInLast10 > 3 ? "amber" : "green"}
+            accent={lateInLast10 > 2 ? "amber" : "green"}
           />
           <StatCard
             label="On Time (last 10)"
             value={onTimeInLast10}
+            subtitle={last10.length > 0 ? `${Math.round((onTimeInLast10 / last10.length) * 100)}% on time` : "No sessions"}
             icon={<TrendingUp size={18} />}
             accent="green"
             className="col-span-2 sm:col-span-1"

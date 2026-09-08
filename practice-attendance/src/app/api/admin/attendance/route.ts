@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/db";
 import { attendances, users, practiceSessions } from "@/db/schema";
-import { eq, gte, lte, and, desc, sql, count, avg } from "drizzle-orm";
+import { eq, gte, lte, and, desc, sql, count } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -23,17 +23,25 @@ export async function GET(req: NextRequest) {
     dateFilters.push(lte(practiceSessions.startTime, toDate));
   }
 
+  // Count total practice sessions in the filtered window
+  const [totalSessionsResult] = await db
+    .select({ count: count() })
+    .from(practiceSessions)
+    .where(dateFilters.length > 0 ? and(...dateFilters) : undefined);
+  const totalPracticeSessions = Number(totalSessionsResult?.count ?? 0);
+
   if (view === "lateness") {
-    // Per-user lateness aggregates
+    // Per-user regularity and lateness aggregates
     const rows = await db
       .select({
         userId: users.id,
         name: users.name,
         email: users.email,
         branch: users.branch,
-        totalSessions: count(attendances.id),
-        lateCount: sql<number>`cast(sum(case when ${attendances.isLate} then 1 else 0 end) as int)`,
-        avgMinutesLate: sql<number>`round(avg(${attendances.minutesLate})::numeric, 1)`,
+        attendedSessions: count(attendances.id),
+        totalPracticeSessions: sql<number>`${totalPracticeSessions}`,
+        lateCount: sql<number>`cast(coalesce(sum(case when ${attendances.isLate} then 1 else 0 end), 0) as int)`,
+        avgMinutesLate: sql<number>`round(coalesce(avg(${attendances.minutesLate}), 0)::numeric, 1)`,
       })
       .from(attendances)
       .innerJoin(users, eq(attendances.userId, users.id))
@@ -44,10 +52,11 @@ export async function GET(req: NextRequest) {
       .where(dateFilters.length > 0 ? and(...dateFilters) : undefined)
       .groupBy(users.id, users.name, users.email, users.branch)
       .orderBy(
+        desc(count(attendances.id)),
         sql`cast(sum(case when ${attendances.isLate} then 1 else 0 end) as int) DESC`
       );
 
-    return NextResponse.json({ rows });
+    return NextResponse.json({ rows, totalPracticeSessions });
   }
 
   // All attendance records with user + session info
@@ -73,5 +82,5 @@ export async function GET(req: NextRequest) {
     .where(dateFilters.length > 0 ? and(...dateFilters) : undefined)
     .orderBy(desc(practiceSessions.startTime));
 
-  return NextResponse.json({ rows });
+  return NextResponse.json({ rows, totalPracticeSessions });
 }
