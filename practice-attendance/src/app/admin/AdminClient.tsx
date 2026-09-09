@@ -14,6 +14,7 @@ import {
   BarChart3,
   CheckCircle2,
   Crown,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -44,6 +45,8 @@ export function AdminClient({
   const [creating, setCreating] = useState(false);
   const [expiring, setExpiring] = useState(false);
   const [showExpireConfirmation, setShowExpireConfirmation] = useState(false);
+  const [deletingSession, setDeletingSession] = useState<Session | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [startTime, setStartTime] = useState(
     format(new Date(), "yyyy-MM-dd'T'HH:mm"),
   );
@@ -110,6 +113,32 @@ export function AdminClient({
       alert("Failed to expire session.");
     } finally {
       setExpiring(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deletingSession) return;
+    setDeleting(true);
+    try {
+      const response = await fetch(
+        `/api/admin/sessions/${deletingSession.id}`,
+        {
+          method: "DELETE",
+        },
+      );
+      if (!response.ok) {
+        throw new Error("Failed to delete session");
+      }
+
+      setSessions((prev) => prev.filter((s) => s.id !== deletingSession.id));
+      if (activeSession?.id === deletingSession.id) {
+        setActiveSession(null);
+      }
+      setDeletingSession(null);
+    } catch {
+      alert("Failed to delete session.");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -307,6 +336,9 @@ export function AdminClient({
                     <th className="text-left px-4 py-3 text-slate-400 font-medium text-xs uppercase tracking-wider">
                       Created
                     </th>
+                    <th className="text-right px-4 py-3 text-slate-400 font-medium text-xs uppercase tracking-wider">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -341,6 +373,16 @@ export function AdminClient({
                       <td className="px-4 py-3 text-slate-400">
                         {format(new Date(s.createdAt), "dd MMM, h:mm a")}
                       </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={() => setDeletingSession(s)}
+                          className="inline-flex items-center gap-1.5 text-xs text-red-400/80 hover:text-red-300 transition-colors"
+                          aria-label={`Delete session from ${format(new Date(s.startTime), "dd MMM yyyy, h:mm a")}`}
+                        >
+                          <Trash2 size={14} />
+                          Delete
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -349,6 +391,42 @@ export function AdminClient({
           </div>
         )}
       </section>
+
+      <Modal
+        isOpen={!!deletingSession}
+        onClose={() => {
+          if (!deleting) setDeletingSession(null);
+        }}
+        title="Delete practice session?"
+      >
+        <div className="p-6 space-y-5">
+          <p className="text-sm text-slate-300">
+            This permanently deletes the session and all attendance records
+            associated with it. This action cannot be undone.
+          </p>
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => setDeletingSession(null)}
+              disabled={deleting}
+              className="px-4 py-2.5 rounded-xl border border-white/10 text-slate-300 hover:bg-white/5 text-sm font-medium transition-colors disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500 text-white hover:bg-red-400 text-sm font-semibold transition-colors disabled:opacity-60"
+            >
+              {deleting ? (
+                <RefreshCw size={15} className="animate-spin" />
+              ) : (
+                <Trash2 size={15} />
+              )}
+              {deleting ? "Deleting…" : "Delete Session"}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
